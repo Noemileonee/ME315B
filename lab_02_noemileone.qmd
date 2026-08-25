@@ -1,0 +1,209 @@
+---
+title: "Laboratório 2: Processamento de Bases de Dados em Lote"
+author: Noemi Leone
+format: html
+editor: visual
+---
+
+##### Compilação do arquivo:
+
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+
+data_compilacao <- format(
+  Sys.time(),
+  format = "%d/%m/%Y %H:%M:%S",
+  tz = "America/Sao_Paulo"
+)
+data_compilacao
+```
+
+##### **Instalação e carregamento de pacotes:**
+
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(ggmap)
+library(tibble)
+library(lubridate)
+```
+
+# ~[Laboratório 2: Processamento de Bases de Dados em Lote]{.smallcaps}~
+
+## Instrução 01 - Estatísticas suficientes
+
+Para calcular o percentual de voos que apresentaram atraso superior a 10 minutos, são necessárias duas estatísticas:
+
+- o número total de voos;
+- o número de voos cujo `ARRIVAL_DELAY` é superior a 10 minutos.
+
+O percentual de atrasos pode então ser calculado por:
+
+$$Perc = \frac{\text{número de voos atrasados}}
+{\text{número total de voos}}$$
+
+Essas estatísticas serão calculadas separadamente para cada combinação de dia, mês e companhia aérea.
+
+## Instrução 02 - Função getStats()
+
+```{r}
+getStats <- function(input, pos) {
+  
+  input %>%
+    filter(
+      AIRLINE %in% c("AA", "DL", "UA", "US")
+    ) %>%
+    filter(
+      !is.na(AIRLINE),
+      !is.na(DAY),
+      !is.na(MONTH),
+      !is.na(ARRIVAL_DELAY)
+    ) %>%
+    group_by(
+      DAY,
+      MONTH,
+      AIRLINE
+    ) %>%
+    summarise(
+      total = n(),
+      atrasados = sum(ARRIVAL_DELAY > 10),
+      .groups = "drop"
+    )
+}
+```
+
+## Instrução 03 - Importação do arquivo flights.csv.zip
+
+```{r, message=FALSE, warning=FALSE}
+callback <- DataFrameCallback$new(getStats)
+stats_lotes <- read_csv_chunked(
+  "flights.csv.zip",
+  callback = callback,
+  chunk_size = 100000,
+  col_types = cols_only(
+    AIRLINE = col_character(),
+    DAY = col_integer(),
+    MONTH = col_integer(),
+    ARRIVAL_DELAY = col_double()
+  ),
+  progress = FALSE
+)
+```
+
+## Instrução 04 - Função computeStats
+
+```{r}
+computeStats <- function(stats) {
+  
+  stats %>%
+    group_by(
+      DAY,
+      MONTH,
+      AIRLINE
+    ) %>%
+    summarise(
+      total = sum(total),
+      atrasados = sum(atrasados),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      Cia = AIRLINE,
+      Data = make_date(
+        year = 2015,
+        month = MONTH,
+        day = DAY
+      ),
+      Perc = atrasados / total
+    ) %>%
+    select(
+      Cia,
+      Data,
+      Perc
+    )
+}
+
+
+stats <- computeStats(stats_lotes)
+head(stats)
+```
+
+## Instrução 05 - Mapa de calor por cia Aérea
+
+#### Executando base do calendário:
+
+```{r}
+pal <- scale_fill_gradient(
+  low = "#4575b4",    
+  high = "#d73027",  
+  na.value = "grey90" 
+)
+
+
+baseCalendario <- function(stats, cia) {
+  dados_cia <- stats %>%
+    filter(Cia == cia)
+  
+  
+  calendario <- dados_cia %>%
+    mutate(
+      dia_semana = wday(Data),           
+      semana = week(Data),                
+      mes = month(Data, label = TRUE, abbr = TRUE)  
+    )
+  
+ 
+  base_plot <- ggplot(calendario, aes(x = dia_semana, y = semana, fill = Perc)) +
+    geom_tile(color = "white", size = 0.5) +     
+    facet_wrap(~mes, scales = "free") +          
+    scale_y_reverse() +                          
+    labs(
+      title = paste("Percentual de Atrasos -", cia),
+      x = "Dia da Semana",
+      y = "Semana",
+      fill = "% Atraso"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.background = element_rect(fill = "lightgray"),
+      panel.grid = element_blank()  
+    )
+  
+  return(base_plot)
+}
+```
+
+#### Executando calendário de cada linha aérea:
+
+```{r}
+CAA <- baseCalendario(stats, "AA")
+CDL <- baseCalendario(stats, "DL")
+cUA <- baseCalendario(stats, "UA")
+cUS <- baseCalendario(stats, "US")
+
+```
+
+###American Airlines
+
+```{r}
+print(CAA + pal + labs(title = "American Airlines (AA) - Percentual de Atrasos 2015"))
+```
+
+###Delta Air Lines
+
+```{r}
+print(CDL + pal + labs(title = "Delta Air Lines (DL) - Percentual de Atrasos 2015"))
+```
+
+###United Airlines
+
+```{r}
+print(cUA + pal + labs(title = "United Airlines (UA) - Percentual de Atrasos 2015"))
+```
+
+###US Airways
+
+```{r}
+print(cUS + pal + labs(title = "US Airways (US) - Percentual de Atrasos 2015"))
+```

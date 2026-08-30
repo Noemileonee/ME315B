@@ -1,0 +1,130 @@
+---
+title: "Laboratório 3: Dados relacionais e operações do tipo join"
+author: "Noemi de Souza Leone"
+format: html
+editor: visual
+---
+
+## HORÁRIO DE COPILAÇÃO
+```{r}
+Sys.setenv(TZ = "America/Sao_Paulo")
+data_hora <- format(Sys.time(), "%d/%m/%Y às %H:%M:%S")
+data_hora
+```
+
+## Carregmento de Pacotes
+```{r, include=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+```
+
+# INSTRUÇÃO 01
+## Importe, utilizando o pacote readr, cada um dos três arquivos disponíveis. Os objetos resultantes devem ser chamados flights, airlines e airports.
+
+```{r}
+# Verifincando conteùdo do arquivo airlines.csv
+airlines <- read_csv("airlines.csv")
+
+airlines
+```
+```{r}
+# Para o arquivo de aeroportos, importe apenas as colunas IATA_CODE, CITY, STATE, LATITUDE, LONGITUDE;
+airports <- read_csv(
+  "airports.csv",
+  col_select = c( 
+    IATA_CODE, 
+    CITY,
+    STATE, 
+    LATITUDE, 
+    LONGITUDE
+  )
+)
+
+airports
+```
+#Para arquivos de voos: 
+##Determine, para cada parte do arquivo, as estatísticas suficientes para a determinação do atraso médio por aeroporto de destino;
+##Ao finalizar a leitura do arquivo, combine as estatísticas suficientes de modo a produzir a média de atraso por aeroporto.
+```{r}
+
+getStats <- function(input, pos) {
+  input |>
+    filter(
+      !is.na(DESTINATION_AIRPORT),
+      !is.na(ARRIVAL_DELAY)
+    ) |>
+    group_by(DESTINATION_AIRPORT) |>
+    summarise(
+      soma = sum(ARRIVAL_DELAY),
+      n = n(),
+      .groups = "drop"
+    )
+}
+
+callback <- DataFrameCallback$new(getStats)
+```
+
+
+
+```{r}
+flights <- read_csv_chunked(
+  "flights.csv",
+  callback = callback,
+  chunk_size = 1000000,
+  col_types = cols_only(
+    DESTINATION_AIRPORT = col_character(),
+    ARRIVAL_DELAY = col_double()
+  )
+)
+flights 
+```
+
+# Instrução 02
+```{r}
+# Aeroportos presentes em flights, mas ausentes em airports 
+flights |>
+  anti_join(
+    airports,
+    by = c("DESTINATION_AIRPORT" = "IATA_CODE")
+  )|>
+  select(DESTINATION_AIRPORT)
+
+# Incluindo CITY e STATE em flights
+flights <- flights |>
+  left_join(
+    airports |>
+      select(IATA_CODE, CITY, STATE),
+    by = c("DESTINATION_AIRPORT" = "IATA_CODE")
+  )
+```
+# INSTRUÇÃO 03
+
+## Quantidade de Aeroportos por estado
+```{r}
+flights |>
+  count(STATE, name = "N_AEROPORTOS", sort = TRUE)
+```
+# INSTRUÇÃO 04
+## Carregando o pacote
+```{r, include=FALSE}
+library(leaflet)
+```
+
+```{r}
+flights <- flights |>
+  left_join(airports, by = c("DESTINATION_AIRPORT" = "IATA_CODE")) |>
+  mutate(atraso_medio = soma / n)
+
+# Criando o mapa
+this <- leaflet(flights) |>
+  addTiles() |>
+  addCircleMarkers(
+    radius = ~atraso_medio/5,
+    color = ~ifelse(atraso_medio > 30, "red", "blue"),
+    popup = ~paste(DESTINATION_AIRPORT, ":", round(atraso_medio, 1), "min")
+  )
+
+this
+```
+
